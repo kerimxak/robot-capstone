@@ -79,6 +79,8 @@ def run():
       time.sleep(1)
       stop()
       state = SEARCHING
+    # Invert colors. RGB to BRG
+    cv2.imshow("Robot", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
     # Add screen info
     cv2.imshow("Robot", annotated)
     if cv2.waitKey(1) & 0xFF == ord('q'):

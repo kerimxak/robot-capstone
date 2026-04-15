@@ -28,10 +28,26 @@ def run():
     frame = cam.capture_array()
     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
     results = model(frame_bgr, verbose=False)
-    # Placeholder: find elevator door in detections
+# Detection logic
     door_detected = False
     door_centered = False
     door_close    = False
+    
+    frame_width = frame_bgr.shape[1]
+    for box in results[0].boxes:
+      cls = int(box.cls[0])
+      conf = float(box.conf[0])
+      if conf < 0.5:
+        continue
+      # Temporarily use class 0 (person) as stand-in for door
+      if cls == 0:
+        door_detected = True
+        x_center = float(box.xywh[0][0])
+        box_width = float(box.xywh[0][2])
+        # Centered if within middle 30% of frame
+        door_centered = abs(x_center - frame_width / 2) < frame_width * 0.15
+        # Close if bounding box is wide enough
+        door_close = box_width > frame_width * 0.4
     if state == SEARCHING:
       if door_detected:
         state = APPROACHING

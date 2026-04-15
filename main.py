@@ -28,6 +28,9 @@ def run():
     frame = cam.capture_array()
     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
     results = model(frame_bgr, verbose=False)
+    # Add info on the screen
+    annotated = results[0].plot()
+    cv2.putText(annotated, f"State: {state}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 # Detection logic
     door_detected = False
     door_centered = False
@@ -76,7 +79,15 @@ def run():
       time.sleep(1)
       stop()
       state = SEARCHING
+    # Add screen info
+    cv2.imshow("Robot", annotated)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+    
     time.sleep(0.1)
+  
+  cam.stop()
+  cv2.destroyAllWindows()
 
 if __name__ == "__main__":
   run()

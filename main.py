@@ -2,6 +2,15 @@ from picamera2 import Picamera2
 from ultralytics import YOLO
 import cv2
 import time
+import RPi.GPIO as GPIO
+
+# --- Ultrasonic sensor setup ---
+TRIG = 23
+ECHO = 24
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(TRIG, GPIO.OUT)
+GPIO.setup(ECHO, GPIO.IN)
 
 # --- State machine states ---
 SEARCHING   = "SEARCHING"
@@ -16,6 +25,21 @@ def move_backward(): print("[MOTOR] Backward")
 def turn_left():     print("[MOTOR] Turn left")
 def turn_right():    print("[MOTOR] Turn right")
 def stop():          print("[MOTOR] Stop")
+
+# --- Distance sensor function ---
+def get_distance():
+    GPIO.output(TRIG, True)
+    time.sleep(0.00001)
+    GPIO.output(TRIG, False)
+
+    while GPIO.input(ECHO) == 0:
+        pulse_start = time.time()
+    while GPIO.input(ECHO) == 1:
+        pulse_end = time.time()
+
+    duration = pulse_end - pulse_start
+    distance = round(duration * 17150, 2)
+    return distance
 
 # --- Main loop ---
 def run():
@@ -34,8 +58,10 @@ def run():
 # Detection logic
     door_detected = False
     door_centered = False
-    door_close    = False
     
+    distance = get_distance()
+    door_close = distance < 20  # closer than 20cm    
+
     frame_width = frame_bgr.shape[1]
     for box in results[0].boxes:
       cls = int(box.cls[0])
@@ -83,6 +109,7 @@ def run():
     # Add screen info
     # Quitting logic
     cv2.putText(annotated, "Press Q to quit", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
+    cv2.putText(annotated, f"Distance: {distance}cm", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
     cv2.imshow("Robot", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
     key = cv2.waitKey(1) & 0xFF
     if key == ord('q') or key == 27:  # q or Escape

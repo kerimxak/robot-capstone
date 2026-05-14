@@ -3,6 +3,8 @@ from ultralytics import YOLO
 import cv2
 import time
 import RPi.GPIO as GPIO
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # --- Ultrasonic sensor setup ---
 TRIG = 23
@@ -41,26 +43,54 @@ def get_distance():
     distance = round(duration * 17150, 2)
     return distance
 
+# --- Web stream ---
+latest_frame = None
+frame_lock = threading.Lock()
+
+class StreamHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'multipart/x-mixed-replace; boundary=frame')
+        self.end_headers()
+        while True:
+            with frame_lock:
+                if latest_frame is None:
+                    continue
+                _, jpeg = cv2.imencode('.jpg', latest_frame)
+            self.wfile.write(b'--frame\r\nContent-Type: image/jpeg\r\n\r\n')
+            self.wfile.write(jpeg.tobytes())
+            self.wfile.write(b'\r\n')
+            time.sleep(0.05)
+
+def start_stream():
+    HTTPServer(('0.0.0.0', 8080), StreamHandler).serve_forever()
+
 # --- Main loop ---
 def run():
   cam = Picamera2()
   cam.start()
   model = YOLO("yolov8n.pt")
 
+  threading.Thread(target=start_stream, daemon=True).start()
+  print("Stream at http://10.42.0.1:8080")
+
   state = SEARCHING
   while True:
     frame = cam.capture_array()
     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
     results = model(frame_bgr, verbose=False)
-    # Add info on the screen
+
     annotated = results[0].plot()
     cv2.putText(annotated, f"State: {state}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-# Detection logic
+
+    # Detection logic
     door_detected = False
     door_centered = False
-    
+
     distance = get_distance()
-    door_close = distance < 20  # closer than 20cm    
+    door_close = distance < 20
 
     frame_width = frame_bgr.shape[1]
     for box in results[0].boxes:
@@ -68,15 +98,13 @@ def run():
       conf = float(box.conf[0])
       if conf < 0.5:
         continue
-      # Temporarily use class 0 (person) as stand-in for door
       if cls == 0:
         door_detected = True
         x_center = float(box.xywh[0][0])
         box_width = float(box.xywh[0][2])
-        # Centered if within middle 30% of frame
         door_centered = abs(x_center - frame_width / 2) < frame_width * 0.15
-        # Close if bounding box is wide enough
         door_close = box_width > frame_width * 0.4
+
     if state == SEARCHING:
       if door_detected:
         state = APPROACHING
@@ -91,34 +119,28 @@ def run():
       else:
         move_forward()
     elif state == ENTERING:
-      # Will use ultrasonic sensor here
       move_forward()
       time.sleep(1)
       stop()
       state = WAITING
     elif state == WAITING:
       stop()
-      # Will detect floor change here
       state = EXITING
     elif state == EXITING:
       move_backward()
       time.sleep(1)
       stop()
       state = SEARCHING
-    # Invert colors. BRG to RGB
-    # Add screen info
-    # Quitting logic
-    cv2.putText(annotated, "Press Q to quit", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
+
     cv2.putText(annotated, f"Distance: {distance}cm", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-    cv2.imshow("Robot", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
-    key = cv2.waitKey(1) & 0xFF
-    if key == ord('q') or key == 27:  # q or Escape
-      break
-    
+
+    with frame_lock:
+      latest_frame = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
+
     time.sleep(0.1)
-  
+
   cam.stop()
-  cv2.destroyAllWindows()
+  GPIO.cleanup()
 
 if __name__ == "__main__":
   run()
